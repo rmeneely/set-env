@@ -1,0 +1,74 @@
+name: 'Set Environment Variables'
+author: Rick Meneely <rick@meneely.com>
+branding:
+  icon: 'settings'
+  color: 'purple'
+description: 'Set environment variables from local dotenv files and AWS Secrets Manager secrets'
+inputs:
+  files:
+    description: 'List of local files in dotenv format'
+    required: false
+    type: string
+  secrets:
+    description: 'List of AWS Secrets Manager secrets (JSON format)'
+    required: false
+    type: string
+  names:
+    description: 'List of variable names to set (comma-separated)'
+    required: false
+    type: string
+runs:
+  using: 'composite'
+  steps:
+    - name: Read local dotenv files
+      if: inputs.files != ''
+      shell: bash
+      run: |
+        IFS=',' read -ra FILES <<< "${{ inputs.files }}"
+        if [ -n "${{ inputs.names }}" ]; then
+          IFS=',' read -ra NAMES <<< "${{ inputs.names }}"
+        fi
+
+        for FILE in "${FILES[@]}"; do
+          if [ -f "$FILE" ]; then
+            while IFS='=' read -r NAME VALUE; do
+              if [[ -n "$NAME" && ! "$NAME" =~ ^\s*# ]]; then
+                NAME=$(echo $NAME | xargs) # trim leading/trailing whitespace
+                VALUE=$(echo $VALUE | xargs)
+                if [ -z "${{ inputs.names }}" ] || [[ " ${NAMES[@]} " =~ " $NAME " ]]; then
+                  echo "$NAME=$VALUE" >> $GITHUB_ENV
+                fi
+              fi
+            done < "$FILE"
+          else
+            echo "File $FILE not found"
+          fi
+        done
+
+    # - name: Configure AWS credentials
+    #   if: inputs.secrets != ''
+    #   uses: aws-actions/configure-aws-credentials@v1
+    #   with:
+    #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    #     aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Fetch secrets from AWS Secrets Manager
+      if: inputs.secrets != ''
+      shell: bash
+      run: |
+        IFS=',' read -ra SECRETS <<< "${{ inputs.secrets }}"
+        if [ -n "${{ inputs.names }}" ]; then
+          IFS=',' read -ra NAMES <<< "${{ inputs.names }}"
+        fi
+
+        for SECRET in "${SECRETS[@]}"; do
+          SECRET_VALUE=$(aws secretsmanager get-secret-value --secret-id "$SECRET" --query SecretString --output text)
+          echo "$SECRET_VALUE" | jq -r 'to_entries|map("\(.key)=\(.value|tostring)")|.[]' | while IFS='=' read -r NAME VALUE; do
+            if [[ -n "$NAME" ]]; then
+              if [ -z "${{ inputs.names }}" ] || [[ " ${NAMES[@]} " =~ " $NAME " ]]; then
+                echo "$NAME=$VALUE" >> $GITHUB_ENV
+              fi
+            fi
+          done
+        done
