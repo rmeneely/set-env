@@ -1,4 +1,4 @@
-name: 'Set Environment Variables'
+name: Set GitHub Actions env context variables
 author: Rick Meneely <rick@meneely.com>
 branding:
   icon: 'settings'
